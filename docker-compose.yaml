@@ -127,11 +127,67 @@ services:
       CLICKHOUSE_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      # Same volume as the old Bitnami image; data-paths.xml keeps its data/ layout
       - 'clickhouse-data:/var/lib/clickhouse'
-      - './clickhouse/data-paths.xml:/etc/clickhouse-server/config.d/data-paths.xml:ro'
-      - './clickhouse/override.xml:/etc/clickhouse-server/config.d/override.xml:ro'
-      - './clickhouse/users-override.xml:/etc/clickhouse-server/users.d/override.xml:ro'
+      # Coolify doesn't copy repo files for compose apps, so configs are inlined via `content`
+      - type: bind
+        source: ./clickhouse/config-override.xml
+        target: /etc/clickhouse-server/config.d/override.xml
+        read_only: true
+        content: |
+          <clickhouse>
+              <logger>
+                  <level>warning</level>
+              </logger>
+              <!-- Official recommendations for systems with <16GB RAM -->
+              <mark_cache_size>524288000</mark_cache_size> <!-- 500MB -->
+              <concurrent_threads_soft_limit_num>1</concurrent_threads_soft_limit_num>
+
+              <!-- ClickHouse's own telemetry, too heavy for the recommended machine size -->
+              <metric_log remove="1"/>
+              <asynchronous_metric_log remove="1"/>
+              <trace_log remove="1"/>
+              <query_thread_log remove="1"/>
+              <session_log remove="1"/>
+              <text_log remove="1"/>
+              <zookeeper_log remove="1"/>
+              <processors_profile_log remove="1"/>
+              <asynchronous_insert_log remove="1"/>
+              <backup_log remove="1"/>
+              <latency_log remove="1"/>
+              <query_metric_log remove="1"/>
+              <opentelemetry_span_log remove="1"/>
+              <query_views_log remove="1"/>
+
+              <part_log>
+                  <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+              </part_log>
+              <query_log>
+                  <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+              </query_log>
+              <error_log>
+                  <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+              </error_log>
+          </clickhouse>
+      - type: bind
+        source: ./clickhouse/users-profile-override.xml
+        target: /etc/clickhouse-server/users.d/override.xml
+        read_only: true
+        content: |
+          <clickhouse>
+              <profiles>
+                  <default>
+                      <max_threads>1</max_threads>
+                      <max_block_size>8192</max_block_size>
+                      <max_download_threads>1</max_download_threads>
+                      <input_format_parallel_parsing>0</input_format_parallel_parsing>
+                      <output_format_parallel_formatting>0</output_format_parallel_formatting>
+                      <memory_profiler_step>0</memory_profiler_step>
+                      <memory_profiler_sample_probability>0</memory_profiler_sample_probability>
+                      <query_profiler_real_time_period_ns>0</query_profiler_real_time_period_ns>
+                      <query_profiler_cpu_time_period_ns>0</query_profiler_cpu_time_period_ns>
+                  </default>
+              </profiles>
+          </clickhouse>
     healthcheck:
       test: ["CMD", "clickhouse-client", "--host", "localhost", "--port", "9000", "--user", "${CLICKHOUSE_ADMIN_USER:-default}", "--password", "${SERVICE_PASSWORD_64_CLICKHOUSE}", "--query", "SELECT 1"]
       interval: 5s
