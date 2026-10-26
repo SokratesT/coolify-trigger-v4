@@ -2,7 +2,7 @@ services:
   trigger:
     networks:
       - trigger-net
-    image: 'ghcr.io/triggerdotdev/trigger.dev:main'
+    image: 'ghcr.io/triggerdotdev/trigger.dev:${TRIGGER_IMAGE_TAG:-v4.8.1}'
     restart: unless-stopped
     depends_on:
       - postgres
@@ -28,6 +28,8 @@ services:
       REDIS_PORT: 6379
       REDIS_TLS_DISABLED: true
       ELECTRIC_ORIGIN: 'http://electric:3000'
+      # v2 needs the s2-lite service from the official compose; v1 uses Redis
+      REALTIME_STREAMS_DEFAULT_VERSION: ${REALTIME_STREAMS_DEFAULT_VERSION:-v1}
       DEV_OTEL_EXPORTER_OTLP_ENDPOINT: '${SERVICE_URL_TRIGGER}/otel'
       DEPLOY_REGISTRY_HOST: '${SERVICE_FQDN_REGISTRY}'
       DEPLOY_REGISTRY_NAMESPACE: '${REGISTRY_NAMESPACE:-trigger}'
@@ -97,7 +99,7 @@ services:
   electric:
     networks:
       - trigger-net
-    image: 'electricsql/electric:1.0.24'
+    image: 'electricsql/electric:1.2.4'
     restart: unless-stopped
     depends_on:
       - postgres
@@ -114,14 +116,22 @@ services:
   clickhouse:
     networks:
       - trigger-net
-    image: 'bitnamilegacy/clickhouse:latest'
+    image: 'clickhouse/clickhouse-server:${CLICKHOUSE_IMAGE_TAG:-26.2}'
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     environment:
-      CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER:-default}
-      CLICKHOUSE_ADMIN_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
+      CLICKHOUSE_USER: ${CLICKHOUSE_ADMIN_USER:-default}
+      CLICKHOUSE_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - 'clickhouse-data:/bitnami/clickhouse'
-      - './clickhouse/override.xml:/bitnami/clickhouse/etc/config.d/override.xml:ro'
+      # Same volume as the old Bitnami image; data-paths.xml keeps its data/ layout
+      - 'clickhouse-data:/var/lib/clickhouse'
+      - './clickhouse/data-paths.xml:/etc/clickhouse-server/config.d/data-paths.xml:ro'
+      - './clickhouse/override.xml:/etc/clickhouse-server/config.d/override.xml:ro'
+      - './clickhouse/users-override.xml:/etc/clickhouse-server/users.d/override.xml:ro'
     healthcheck:
       test: ["CMD", "clickhouse-client", "--host", "localhost", "--port", "9000", "--user", "${CLICKHOUSE_ADMIN_USER:-default}", "--password", "${SERVICE_PASSWORD_64_CLICKHOUSE}", "--query", "SELECT 1"]
       interval: 5s
@@ -167,7 +177,7 @@ services:
   supervisor:
     networks:
       - trigger-net
-    image: 'ghcr.io/triggerdotdev/supervisor:v4-beta'
+    image: 'ghcr.io/triggerdotdev/supervisor:${TRIGGER_IMAGE_TAG:-v4.8.1}'
     restart: unless-stopped
     depends_on:
       - docker-proxy
